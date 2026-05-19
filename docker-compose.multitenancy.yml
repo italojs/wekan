@@ -8,13 +8,13 @@
 # (network_mode: "host"), both connected to the same MongoDB replica-set,
 # both using DDP_TRANSPORT=uws + METEOR_REACTIVITY_ORDER=changeStreams.
 #
-# Prerequisites (on the host, run once):
-#   sudo sh -c 'echo "127.0.0.1 tenant1.local tenant2.local" >> /etc/hosts'
-#
 # Usage:
 #   docker compose -f docker-compose.multitenancy.yml up -d
-#   open http://tenant1.local:8081
-#   open http://tenant2.local:8082
+#   open http://localhost:8081   # tenant 1
+#   open http://localhost:8082   # tenant 2
+#
+# (Different ports = different browser origins, so cookies/localStorage stay
+# isolated between tenants — no /etc/hosts entries needed.)
 #
 # Tear down:
 #   docker compose -f docker-compose.multitenancy.yml down -v
@@ -75,7 +75,7 @@ services:
       - wekan-db-mt
     environment:
       - PORT=8081
-      - ROOT_URL=http://tenant1.local:8081
+      - ROOT_URL=http://localhost:8081
       - MONGO_URL=mongodb://127.0.0.1:27017/wekan_tenant1?replicaSet=rs0
       - MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
       - METEOR_REACTIVITY_ORDER=changeStreams,oplog,polling
@@ -107,7 +107,7 @@ services:
       - wekan-db-mt
     environment:
       - PORT=8082
-      - ROOT_URL=http://tenant2.local:8082
+      - ROOT_URL=http://localhost:8082
       - MONGO_URL=mongodb://127.0.0.1:27017/wekan_tenant2?replicaSet=rs0
       - MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
       - METEOR_REACTIVITY_ORDER=changeStreams,oplog,polling
