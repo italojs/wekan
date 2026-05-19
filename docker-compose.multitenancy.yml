@@ -1,0 +1,133 @@
+# =============================================================================
+# Multitenancy bug reproduction stack
+# =============================================================================
+# Purpose: reproduce the uws + changeStreams cross-tenant data leakage bug
+# described in docs/Platforms/FOSS/Docker/Meteor3/multitenancy.md
+#
+# Two Wekan instances share the LinuxKit VM kernel network namespace
+# (network_mode: "host"), both connected to the same MongoDB replica-set,
+# both using DDP_TRANSPORT=uws + METEOR_REACTIVITY_ORDER=changeStreams.
+#
+# Prerequisites (on the host, run once):
+#   sudo sh -c 'echo "127.0.0.1 tenant1.local tenant2.local" >> /etc/hosts'
+#
+# Usage:
+#   docker compose -f docker-compose.multitenancy.yml up -d
+#   open http://tenant1.local:8081
+#   open http://tenant2.local:8082
+#
+# Tear down:
+#   docker compose -f docker-compose.multitenancy.yml down -v
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Shared MongoDB 7 with replica set (required for changeStreams)
+  # Bound only to 127.0.0.1:27017 on the LinuxKit VM host netns.
+  # ---------------------------------------------------------------------------
+  wekan-db-mt:
+    image: mongo:7
+    container_name: wekan-db-mt
+    restart: unless-stopped
+    network_mode: "host"
+    command: >
+      sh -c '
+        mongod --storageEngine wiredTiger --wiredTigerCacheSizeGB 1
+               --timeZoneInfo /usr/share/zoneinfo
+               --oplogSize 2048 --replSet rs0
+               --bind_ip 127.0.0.1 --port 27017 --quiet &
+        until mongosh --host 127.0.0.1 --port 27017 --quiet --eval "
+          try {
+            const status = rs.status();
+            quit(status.ok === 1 ? 0 : 1);
+          } catch (e) {
+            if (
+              e.codeName === \"NotYetInitialized\" ||
+              e.message.includes(\"no replset config has been received\") ||
+              e.message.includes(\"not yet initialized\")
+            ) {
+              rs.initiate({
+                _id: \"rs0\",
+                members: [{ _id: 0, host: \"127.0.0.1:27017\" }]
+              });
+              quit(1);
+            }
+            quit(1);
+          }
+        " >/dev/null 2>&1; do
+          sleep 2
+        done
+        wait
+      '
+    volumes:
+      - wekan-db-mt:/data/db
+
+  # ---------------------------------------------------------------------------
+  # Tenant 1: ROOT_URL http://tenant1.local:8081
+  # ---------------------------------------------------------------------------
+  wekan-tenant1:
+    image: ghcr.io/wekan/wekan:latest
+    container_name: wekan-tenant1
+    restart: unless-stopped
+    network_mode: "host"
+    depends_on:
+      - wekan-db-mt
+    environment:
+      - PORT=8081
+      - ROOT_URL=http://tenant1.local:8081
+      - MONGO_URL=mongodb://127.0.0.1:27017/wekan_tenant1?replicaSet=rs0
+      - MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+      - METEOR_REACTIVITY_ORDER=changeStreams,oplog,polling
+      - DDP_TRANSPORT=uws
+      - WRITABLE_PATH=/data
+      - WITH_API=true
+      - RICHER_CARD_COMMENT_EDITOR=false
+      - CARD_OPENED_WEBHOOK_ENABLED=false
+      - BIGEVENTS_PATTERN=NONE
+      - BROWSER_POLICY_ENABLED=true
+      - TRUSTED_URL=
+      - WEBHOOKS_ATTRIBUTES=
+      - OAUTH2_ENABLED=false
+      - DEFAULT_AUTHENTICATION_METHOD=password
+      - PASSWORD_LOGIN_ENABLED=true
+      - WAIT_SPINNER=Bounce
+    volumes:
+      - wekan-tenant1-data:/data
+
+  # ---------------------------------------------------------------------------
+  # Tenant 2: ROOT_URL http://tenant2.local:8082
+  # ---------------------------------------------------------------------------
+  wekan-tenant2:
+    image: ghcr.io/wekan/wekan:latest
+    container_name: wekan-tenant2
+    restart: unless-stopped
+    network_mode: "host"
+    depends_on:
+      - wekan-db-mt
+    environment:
+      - PORT=8082
+      - ROOT_URL=http://tenant2.local:8082
+      - MONGO_URL=mongodb://127.0.0.1:27017/wekan_tenant2?replicaSet=rs0
+      - MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+      - METEOR_REACTIVITY_ORDER=changeStreams,oplog,polling
+      - DDP_TRANSPORT=uws
+      - WRITABLE_PATH=/data
+      - WITH_API=true
+      - RICHER_CARD_COMMENT_EDITOR=false
+      - CARD_OPENED_WEBHOOK_ENABLED=false
+      - BIGEVENTS_PATTERN=NONE
+      - BROWSER_POLICY_ENABLED=true
+      - TRUSTED_URL=
+      - WEBHOOKS_ATTRIBUTES=
+      - OAUTH2_ENABLED=false
+      - DEFAULT_AUTHENTICATION_METHOD=password
+      - PASSWORD_LOGIN_ENABLED=true
+      - WAIT_SPINNER=Bounce
+    volumes:
+      - wekan-tenant2-data:/data
+
+volumes:
+  wekan-db-mt:
+  wekan-tenant1-data:
+  wekan-tenant2-data:
