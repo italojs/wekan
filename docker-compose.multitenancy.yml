@@ -24,42 +24,21 @@ services:
 
   # ---------------------------------------------------------------------------
   # Shared MongoDB 7 with replica set (required for changeStreams)
-  # Bound only to 127.0.0.1:27017 on the LinuxKit VM host netns.
+  # Bound only to 127.0.0.1:27018 on the LinuxKit VM host netns.
   # ---------------------------------------------------------------------------
   wekan-db-mt:
     image: mongo:7
     container_name: wekan-db-mt
     restart: unless-stopped
     network_mode: "host"
-    command: >
-      sh -c '
-        mongod --storageEngine wiredTiger --wiredTigerCacheSizeGB 1
-               --timeZoneInfo /usr/share/zoneinfo
-               --oplogSize 2048 --replSet rs0
-               --bind_ip 127.0.0.1 --port 27017 --quiet &
-        until mongosh --host 127.0.0.1 --port 27017 --quiet --eval "
-          try {
-            const status = rs.status();
-            quit(status.ok === 1 ? 0 : 1);
-          } catch (e) {
-            if (
-              e.codeName === \"NotYetInitialized\" ||
-              e.message.includes(\"no replset config has been received\") ||
-              e.message.includes(\"not yet initialized\")
-            ) {
-              rs.initiate({
-                _id: \"rs0\",
-                members: [{ _id: 0, host: \"127.0.0.1:27017\" }]
-              });
-              quit(1);
-            }
-            quit(1);
-          }
-        " >/dev/null 2>&1; do
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        mongod --storageEngine wiredTiger --wiredTigerCacheSizeGB 1 --timeZoneInfo /usr/share/zoneinfo --oplogSize 2048 --replSet rs0 --bind_ip 127.0.0.1 --port 27018 --quiet &
+        until mongosh --host 127.0.0.1 --port 27018 --quiet --eval 'try { const s = rs.status(); quit(s.ok === 1 ? 0 : 1); } catch (e) { if (e.codeName === "NotYetInitialized" || /no replset config has been received|not yet initialized/.test(e.message)) { rs.initiate({_id:"rs0", members:[{_id:0, host:"127.0.0.1:27018"}]}); quit(1); } quit(1); }' >/dev/null 2>&1; do
           sleep 2
         done
         wait
-      '
     volumes:
       - wekan-db-mt:/data/db
 
@@ -76,8 +55,8 @@ services:
     environment:
       - PORT=8081
       - ROOT_URL=http://localhost:8081
-      - MONGO_URL=mongodb://127.0.0.1:27017/wekan_tenant1?replicaSet=rs0
-      - MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+      - MONGO_URL=mongodb://127.0.0.1:27018/wekan_tenant1?replicaSet=rs0&appName=wekan-tenant1
+      - MONGO_OPLOG_URL=mongodb://127.0.0.1:27018/local?replicaSet=rs0&appName=wekan-tenant1-oplog
       - METEOR_REACTIVITY_ORDER=changeStreams,oplog,polling
       - DDP_TRANSPORT=uws
       - WRITABLE_PATH=/data
@@ -108,8 +87,8 @@ services:
     environment:
       - PORT=8082
       - ROOT_URL=http://localhost:8082
-      - MONGO_URL=mongodb://127.0.0.1:27017/wekan_tenant2?replicaSet=rs0
-      - MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+      - MONGO_URL=mongodb://127.0.0.1:27018/wekan_tenant2?replicaSet=rs0&appName=wekan-tenant2
+      - MONGO_OPLOG_URL=mongodb://127.0.0.1:27018/local?replicaSet=rs0&appName=wekan-tenant2-oplog
       - METEOR_REACTIVITY_ORDER=changeStreams,oplog,polling
       - DDP_TRANSPORT=uws
       - WRITABLE_PATH=/data
